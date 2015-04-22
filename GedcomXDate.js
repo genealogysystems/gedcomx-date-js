@@ -300,7 +300,6 @@ module.exports = Duration;
 },{}],3:[function(require,module,exports){
 var GedUtil = require('./util.js'),
     Simple = require('./simple.js'),
-    Duration = require('./duration.js'),
     Approximate = require('./approximate.js'),
     Recurring = require('./recurring.js'),
     Range = require('./range.js');
@@ -362,8 +361,13 @@ GedcomXDate.now = GedUtil.now;
  */
 GedcomXDate.fromJSDate = GedUtil.fromJSDate;
 
+/**
+ * Expose compare.
+ */
+GedcomXDate.compare = GedUtil.compare;
+
 module.exports = GedcomXDate;
-},{"./approximate.js":1,"./duration.js":2,"./range.js":4,"./recurring.js":5,"./simple.js":6,"./util.js":8}],4:[function(require,module,exports){
+},{"./approximate.js":1,"./range.js":4,"./recurring.js":5,"./simple.js":6,"./util.js":8}],4:[function(require,module,exports){
 var GedUtil = require('./util.js'),
     Simple = require('./simple.js'),
     Duration = require('./duration.js'),
@@ -604,7 +608,7 @@ function Simple() {
  */
 Simple.prototype._parse = function(str) {
 
-  var end = str.length;
+  var end = str.length,
       offset = 0;
 
   // There is a minimum length of 5 characters
@@ -1042,7 +1046,8 @@ module.exports = {
   addDuration: addDuration,
   multiplyDuration: multiplyDuration,
   now: now,
-  fromJSDate: fromJSDate
+  fromJSDate: fromJSDate,
+  compare: compare
 }
 
 /**
@@ -1181,15 +1186,12 @@ function addDuration(startDate, duration) {
     end.day += duration.getDays();
   }
   while(end.day && end.day > GlobalUtil.daysInMonth(end.month, end.year)) {
+    end.day -= GlobalUtil.daysInMonth(end.month, end.year);
     end.month += 1;
     if(end.month > 12) {
       end.month -= 12;
       end.year += 1;
     }
-    end.day -= GlobalUtil.daysInMonth(end.month, end.year);
-  }
-  if(end.day != undefined) {
-    endString = '-'+('00'+end.day).substr(-2,2)+endString;
   }
 
   if(duration.getMonths()) {
@@ -1198,6 +1200,19 @@ function addDuration(startDate, duration) {
   while(end.month && end.month > 12) {
     end.month -= 12;
     end.year += 1;
+  }
+  // After readjusting the month, check again for days overflow
+  if(end.day && end.day > GlobalUtil.daysInMonth(end.month, end.year)){
+    end.day = end.day - GlobalUtil.daysInMonth(end.month, end.year);
+    end.month += 1;
+    if(end.month > 12) {
+      end.month -= 12;
+      end.year += 1;
+    }
+  }
+  
+  if(end.day != undefined) {
+    endString = '-'+('00'+end.day).substr(-2,2)+endString;
   }
   if(end.month != undefined) {
     endString = '-'+('00'+end.month).substr(-2,2)+endString;
@@ -1287,12 +1302,12 @@ function getDuration(startDate, endDate) {
 
   if(end.day != undefined) {
     while(end.day-start.day < 0) {
-      end.day += GlobalUtil.daysInMonth(end.month,end.year);
       end.month -= 1;
       if(end.month < 1) {
         end.year -= 1;
         end.month += 12;
       }
+      end.day += GlobalUtil.daysInMonth(end.month,end.year);
     }
     if(end.day-start.day > 0) {
       duration = ('00'+(end.day-start.day)).substr(-2,2)+'D'+duration;
@@ -1465,6 +1480,86 @@ function fromJSDate(date){
   // Remove the millisecond time component
   return new Simple('+' + date.toISOString().replace(/\.\d{3}/,''));
 };
+
+/**
+ * Compare two dates. Only works for single dates right now.
+ * Designed to be usable as a custom compare function for sorting an array of dates.
+ * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/sort
+ */
+function compare(date1, date2){
+  
+  // Allow formal strings as input
+  if(isString(date1)){
+    if(date1[0] === 'A'){
+      date1 = new Approximate(date1);
+    } else {
+      date1 = new Simple(date1);
+    }
+  }
+  if(isString(date2)){
+    if(date2[0] === 'A'){
+      date2 = new Approximate(date2);
+    } else {
+      date2 = new Simple(date2);
+    }
+  }
+  
+  // Only allow simple dates
+  if(!(date1 instanceof Simple) || !(date2 instanceof Simple)){
+    throw new Error('Bad input. Can only compare simple dates.');
+  }
+  
+  // Compare date parts in descending order
+  var parts = [
+    '_year',
+    '_month',
+    '_day',
+    '_hours',
+    '_minutes',
+    '_seconds'
+  ];
+  
+  // We will short-circuit when we determine whether one
+  // date is greater than the other
+  for(var i = 0; i < parts.length; i++){
+    var part = parts[i];
+    
+    // If these parts match exactly, 
+    if(date1[part] === date2[part]){
+      continue;
+    }
+
+    // If either part is undefined then consider the dates equal.
+    // Undefined parts are only allowed for lower order positions and
+    // cannot occur if anything is defined in a lower order. For example,
+    // you can't have a year and day but no month. So once we see something
+    // that was undefined we know everything before that matched and
+    // therefore the dates are effectively equal (either we're done comparing
+    // because nothing else is defined or we're comparing two dates with
+    // different specifities, i.e. comparing +1900 to +1900-04)
+    if(typeof date1[part] === 'undefined' || typeof date2[part] === 'undefined'){
+      break;
+    }
+    
+    // By this point we're guaranteed that this part is defined in both dates
+    // so we can finally do some > and <
+    if(date1[part] > date2[part]){
+      return 1;
+    } else {
+      return -1;
+    }
+    
+  }
+  
+  // If we make it here then the dates are equal
+  return 0;
+  
+};
+
+function isString(obj){
+  return typeof obj === 'string' || obj instanceof String;
+};
+
 },{"./approximate.js":1,"./duration.js":2,"./simple.js":6,"./util-global.js":7}],9:[function(require,module,exports){
 if (typeof Object.create === 'function') {
   // implementation from standard node.js 'util' module
